@@ -42,92 +42,93 @@ int predict(network * net,image im,float thresh,char* nameslist, detection* dcts
 
 
 
-void train_classifier(network * net)
+
+void train_detector_i(network * net,char **paths,int size)
 {
+    printf("tamanho %i\n",size);
+    char *backup_directory = "backup/";
+    int i;
+    int ngpus = 1;
+    srand(time(0));
+    float avg_loss = -1;
 
-    int imgs = net->batch * net->subdivisions * 1;
+    srand(time(0));
+    int seed = rand();
+    srand(time(0));
 
-    printf("Learning Rate: %g, Momentum: %g, Decay: %g\n", net.learning_rate, net.momentum, net.decay);
-    list *options = read_data_cfg(datacfg);
+    int imgs = net->batch * net->subdivisions * ngpus;
+    printf("Learning Rate: %g, Momentum: %g, Decay: %g\n", net->learning_rate, net->momentum, net->decay);
+    data train, buffer;
 
-    char *backup_directory = option_find_str(options, "backup", "/backup/");
-    char *label_list = option_find_str(options, "labels", "data/labels.list");
-    char *train_list = option_find_str(options, "train", "data/train.list");
-    int classes = option_find_int(options, "classes", 2);
+    layer l = net->layers[net->n - 1];
 
-    char **labels = get_labels(label_list);
-    list *plist = get_paths(train_list);
-    char **paths = (char **)list_to_array(plist);
-    printf("%d\n", plist->size);
-    int N = plist->size;
-    double time;
-
-    load_args args = {0};
-    args.w = net.w;
-    args.h = net.h;
-    args.threads = 64;
-    args.hierarchy = net.hierarchy;
-
-    args.min = net.min_crop;
-    args.max = net.max_crop;
-    args.angle = net.angle;
-    args.aspect = net.aspect;
-    args.exposure = net.exposure;
-    args.saturation = net.saturation;
-    args.hue = net.hue;
-    args.size = net.w;
-
+    int classes = l.classes;
+    float jitter = l.jitter;
+   
+    load_args args = get_base_args(*net);
+    args.coords = l.coords;
     args.paths = paths;
-    args.classes = classes;
     args.n = imgs;
-    args.m = N;
-    args.labels = labels;
-    args.type = CLASSIFICATION_DATA;
-
-    data train;
-    data buffer;
-    pthread_t load_thread;
+    args.m = size;
+    args.classes = classes;
+    args.jitter = jitter;
+    args.num_boxes = l.max_boxes;
     args.d = &buffer;
-    load_thread = load_data(args);
+    args.type = DETECTION_DATA;
+    //args.type = INSTANCE_DATA;
+    args.threads = 8;
 
-    int epoch = (*net.seen)/N;
-    while(get_current_batch(net) < net.max_batches || net.max_batches == 0){
-        time = what_time_is_it_now();
+    #ifdef GPU
+        cuda_set_device(0);
+    #endif
 
+    pthread_t load_thread = load_data(args);
+    clock_t time;
+    int count = 0;
+    //while(i*imgs < N*120){
+    while(get_current_batch(*net) < net->max_batches){
+        if(l.random && count++%10 == 0){
+            printf("Resizing\n");
+            int dim = (rand() % 10 + 10) * 32;
+            if (get_current_batch(*net)+200 > net->max_batches) dim = 608;
+            //int dim = (rand() % 4 + 16) * 32;
+            printf("%d\n", dim);
+            args.w = dim;
+            args.h = dim;
+
+            pthread_join(load_thread, 0);
+            train = buffer;
+            free_data(train);
+            load_thread = load_data(args);
+
+            resize_network(net, dim, dim);
+
+        }
+        time=clock();
         pthread_join(load_thread, 0);
         train = buffer;
         load_thread = load_data(args);
 
-        printf("Loaded: %lf seconds\n", what_time_is_it_now()-time);
-        time = what_time_is_it_now();
+        printf("Loaded: %lf seconds\n", sec(clock()-time));
 
+        time=clock();
         float loss = 0;
 
-        loss = train_network(net, train);
-
-        if(avg_loss == -1) avg_loss = loss;
+        loss = train_network(*net, train);
+        if (avg_loss < 0) avg_loss = loss;
         avg_loss = avg_loss*.9 + loss*.1;
-        printf("%ld, %.3f: %f, %f avg, %f rate, %lf seconds, %ld images\n", get_current_batch(net), (float)(*net.seen)/N, loss, avg_loss, get_current_rate(net), what_time_is_it_now()-time, *net.seen);
+        i = get_current_batch(*net);
+        printf("%ld: %f, %f avg, %f rate, %lf seconds, %d images\n", get_current_batch(*net), loss, avg_loss, get_current_rate(*net), sec(clock()-time), i*imgs);
+        if(i%100==0){
+            char buff[256];
+            save_weights(*net, buff);
+        }
+        if(i%10000==0 || (i < 1000 && i%100 == 0)){
+            char buff[256];
+            save_weights(*net, buff);
+        }
         free_data(train);
-        if(*net.seen/N > epoch){
-            epoch = *net.seen/N;
-            char buff[256];
-            sprintf(buff, "%s/%s_%d.weights",backup_directory,base, epoch);
-            save_weights(net, buff);
-        }
-        if(get_current_batch(net)%1000 == 0){
-            char buff[256];
-            sprintf(buff, "%s/%s.backup",backup_directory,base);
-            save_weights(net, buff);
-        }
     }
     char buff[256];
-    sprintf(buff, "%s/%s.weights", backup_directory, base);
-    save_weights(net, buff);
-
-    free_network(net);
-    free_ptrs((void**)labels, classes);
-    free_ptrs((void**)paths, plist->size);
-    free_list(plist);
-    free(base);
+    save_weights(*net, buff);
 }

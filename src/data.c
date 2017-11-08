@@ -212,7 +212,7 @@ void correct_boxes(box_label *boxes, int n, float dx, float dy, float sx, float 
 void fill_truth_swag(char *path, float *truth, int classes, int flip, float dx, float dy, float sx, float sy)
 {
     char labelpath[4096];
-    find_replace(path, "images", "labels", labelpath);
+    find_replace(path, "images2", "labels", labelpath);
     find_replace(labelpath, "JPEGImages", "labels", labelpath);
     find_replace(labelpath, ".jpg", ".txt", labelpath);
     find_replace(labelpath, ".JPG", ".txt", labelpath);
@@ -404,8 +404,8 @@ void fill_truth_iseg(char *path, int num_boxes, float *truth, int classes, int w
 void fill_truth_detection(char *path, int num_boxes, float *truth, int classes, int flip, float dx, float dy, float sx, float sy)
 {
     char labelpath[4096];
-    find_replace(path, "images", "labels", labelpath);
-    find_replace(labelpath, "JPEGImages", "labels", labelpath);
+    find_replace(path, "images", "images", labelpath);
+    find_replace(labelpath, "JPEGImages", "JPEGImages", labelpath);
 
     find_replace(labelpath, "raw", "labels", labelpath);
     find_replace(labelpath, ".jpg", ".txt", labelpath);

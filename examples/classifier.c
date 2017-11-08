@@ -18,7 +18,7 @@ float *get_regression_values(char **labels, int n)
 void train_classifier(char *datacfg, char *cfgfile, char *weightfile, int *gpus, int ngpus, int clear)
 {
     int i;
-
+    printf("ng %i\n",ngpus);
     float avg_loss = -1;
     char *base = basecfg(cfgfile);
     printf("%s\n", base);
@@ -39,7 +39,7 @@ void train_classifier(char *datacfg, char *cfgfile, char *weightfile, int *gpus,
     network net = nets[0];
 
     int imgs = net.batch * net.subdivisions * ngpus;
-
+    
     printf("Learning Rate: %g, Momentum: %g, Decay: %g\n", net.learning_rate, net.momentum, net.decay);
     list *options = read_data_cfg(datacfg);
 
