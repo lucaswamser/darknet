@@ -9,6 +9,16 @@
 #include "blas.h"
 #include "detection.h"
 
+typedef struct{
+    load_args args;
+    layer l;
+    pthread_t load_thread;
+    network net;
+    data train, buffer;
+    int t;
+} traindata;
+
+
 int predict(network * net,image im,float thresh,char* nameslist, detection* dcts){
       int j;
 	  char ** names = get_labels(nameslist);
@@ -40,13 +50,13 @@ int predict(network * net,image im,float thresh,char* nameslist, detection* dcts
 
 
 
+void save_weights_i(network * net,char *name){
+    save_weights(*net, name);
+}
 
 
-
-void train_detector_i(network * net,char **paths,int size)
+void train_detector_i(network * net,char **paths,int size,int batches)
 {
-    printf("tamanho %i\n",size);
-    char *backup_directory = "backup/";
     int i;
     int ngpus = 1;
     srand(time(0));
@@ -85,13 +95,11 @@ void train_detector_i(network * net,char **paths,int size)
     pthread_t load_thread = load_data(args);
     clock_t time;
     int count = 0;
-    //while(i*imgs < N*120){
     while(get_current_batch(*net) < net->max_batches){
         if(l.random && count++%10 == 0){
             printf("Resizing\n");
             int dim = (rand() % 10 + 10) * 32;
             if (get_current_batch(*net)+200 > net->max_batches) dim = 608;
-            //int dim = (rand() % 4 + 16) * 32;
             printf("%d\n", dim);
             args.w = dim;
             args.h = dim;
@@ -102,7 +110,6 @@ void train_detector_i(network * net,char **paths,int size)
             load_thread = load_data(args);
 
             resize_network(net, dim, dim);
-
         }
         time=clock();
         pthread_join(load_thread, 0);
@@ -119,16 +126,85 @@ void train_detector_i(network * net,char **paths,int size)
         avg_loss = avg_loss*.9 + loss*.1;
         i = get_current_batch(*net);
         printf("%ld: %f, %f avg, %f rate, %lf seconds, %d images\n", get_current_batch(*net), loss, avg_loss, get_current_rate(*net), sec(clock()-time), i*imgs);
-        if(i%100==0){
-            char buff[256];
-            save_weights(*net, buff);
-        }
-        if(i%10000==0 || (i < 1000 && i%100 == 0)){
-            char buff[256];
-            save_weights(*net, buff);
-        }
         free_data(train);
     }
-    char buff[256];
-    save_weights(*net, buff);
+}
+
+
+
+traindata* load_train_t(network * net,char **paths,int size)
+{
+    traindata *td = malloc(2*sizeof(traindata)); 
+
+    int ngpus = 1;
+
+    srand(time(0));
+    int seed = rand();
+    srand(time(0));
+
+    int imgs = net->batch * net->subdivisions * ngpus;
+    printf("Learning Rate: %g, Momentum: %g, Decay: %g\n", net->learning_rate, net->momentum, net->decay);
+
+    layer l = net->layers[net->n - 1];
+
+    int classes = l.classes;
+    float jitter = l.jitter;
+   
+    load_args args = get_base_args(*net);
+    args.coords = l.coords;
+    args.paths = paths;
+    args.n = imgs;
+    args.m = size;
+    args.classes = classes;
+    args.jitter = jitter;
+    args.num_boxes = l.max_boxes;
+    args.d = &td->buffer;
+    args.type = DETECTION_DATA;
+    //args.type = INSTANCE_DATA;
+    args.threads = 8;
+
+    #ifdef GPU
+        cuda_set_device(0);
+    #endif
+
+
+
+    pthread_t load_thread = load_data(args);
+    td->args = args;
+    td->load_thread = load_thread;
+    td->l = l;
+    td->net = *net;
+    td->t = 6;
+    return td;
+
+}
+
+void train_t(traindata *td,int count){
+
+    if(td->l.random && count++%10 == 0){
+        printf("Resizing\n");
+        int dim = (rand() % 10 + 10) * 32;
+        if (get_current_batch(td->net)+200 > td->net.max_batches) dim = 608;
+        printf("%d\n", dim);
+        td->args.w = dim;
+        td->args.h = dim;
+
+        pthread_join(td->load_thread, 0);
+        td->train = td->buffer;
+        free_data(td->train);
+        td->load_thread = load_data(td->args);
+
+        resize_network(&td->net, dim, dim);
+    }
+    pthread_join(td->load_thread, 0);
+    td->train = td->buffer;
+    td->load_thread = load_data(td->args);
+    float loss = 0;
+
+    loss = train_network(td->net, td->train);
+   
+    int i = get_current_batch(td->net);
+    printf("%ld: %f,  %f rate, %d images\n", get_current_batch(td->net), loss,  get_current_rate(td->net), i);
+    free_data(td->train);
+    
 }
