@@ -45,6 +45,7 @@ int predict(network * net,image im,float thresh,char* nameslist, detection* dcts
       get_region_boxes(l, im.w, im.h, net->w, net->h, thresh, probs, boxes, masks, 0, 0, hier_thresh, 1);
       if (nms) do_nms_obj(boxes, probs, l.w*l.h*l.n, l.classes, nms);
 
+      free_image(sized);
       return  get_detections(l.w * l.h * l.n, thresh, boxes, probs, names,l.classes,dcts);
 }
 

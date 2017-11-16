@@ -29,6 +29,12 @@ int get_detections(int num, float thresh, box *boxes, float **probs, char **name
     return count;
 }
 
-void free_detections(detection* dec){
-	free(dec);
+void free_detections(detection* dec,int count){
+    free(dec);
+    // int i;
+    // for(i = 0; i < count; ++i){
+    //    printf("%s\n",dec[i].classname);
+    //    free(&dec[i].b);
+    // }
 }
+
